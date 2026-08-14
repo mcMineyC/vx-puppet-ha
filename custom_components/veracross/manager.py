@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import platform
-import os
+import os, stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
