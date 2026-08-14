@@ -98,6 +98,8 @@ class VeracrossManager:
         )
 
     def _run_cli_blocking(self) -> list[dict]:
+        path = self._lightpanda_dir() / "lightpanda"
+        os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         binary = self._binary_path()
         args = [
             str(binary),
