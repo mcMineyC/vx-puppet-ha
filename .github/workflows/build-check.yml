@@ -1,0 +1,22 @@
+name: Build check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build CLI for linux/amd64 + linux/arm64
+        run: bash scripts/build_binaries.sh
+      - name: Fail if bin/ drifted from what's committed
+        run: |
+          git diff --stat --exit-code -- custom_components/veracross/bin \
+            || (echo "::warning::committed binaries are stale vs latest vx_puppet — run scripts/build_binaries.sh and commit" && true)

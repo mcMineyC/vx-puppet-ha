@@ -1,0 +1,12 @@
+{
+  "domain": "veracross",
+  "name": "Veracross Grades",
+  "codeowners": ["@mcMineyC"],
+  "config_flow": true,
+  "documentation": "https://github.com/mcMineyC/ha-veracross",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/mcMineyC/ha-veracross/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}

@@ -1,0 +1,80 @@
+name: Release
+
+# Manually triggered: bump the integration version, rebuild the vx_ha_cli
+# binaries against the latest (or a pinned) vx_puppet, commit them, tag, and
+# publish a GitHub release. HACS tracks releases by tag + manifest version,
+# so this is the one workflow that actually ships something installable.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New integration version (e.g. 1.1.0, no leading v)"
+        required: true
+      vx_puppet_version:
+        description: "vx_puppet version/tag to build against (blank = latest)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Build vx_ha_cli binaries
+        working-directory: tools/vx_ha_cli
+        run: |
+          if [ -n "${{ inputs.vx_puppet_version }}" ]; then
+            go get "github.com/mcMineyC/vx_puppet@${{ inputs.vx_puppet_version }}"
+          else
+            go get github.com/mcMineyC/vx_puppet@latest
+          fi
+          go mod tidy
+
+          OUT_DIR="$GITHUB_WORKSPACE/custom_components/veracross/bin"
+          mkdir -p "$OUT_DIR"
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -ldflags="-s -w" -o "$OUT_DIR/vx_ha_cli_linux_$arch" .
+          done
+
+      - name: Bump manifest.json version
+        run: |
+          python3 - <<'EOF'
+          import json
+          path = "custom_components/veracross/manifest.json"
+          with open(path) as f:
+              data = json.load(f)
+          data["version"] = "${{ inputs.version }}"
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          EOF
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/veracross/bin custom_components/veracross/manifest.json tools/vx_ha_cli/go.mod tools/vx_ha_cli/go.sum
+          git commit -m "release: v${{ inputs.version }}"
+          git tag "v${{ inputs.version }}"
+          git push origin HEAD:main
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ inputs.version }}" \
+            --title "v${{ inputs.version }}" \
+            --generate-notes
