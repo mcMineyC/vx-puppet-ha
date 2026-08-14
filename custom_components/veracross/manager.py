@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import platform
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -65,6 +66,7 @@ class VeracrossManager:
         path = integration_dir / BINARY_DIR_NAME / f"{BINARY_PREFIX}{arch}"
         if not path.exists():
             raise VeracrossError(f"bundled binary missing for arch {arch}: {path}")
+        os.chmod(path, os.stat(file_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         return path
 
     def _lightpanda_dir(self) -> str:

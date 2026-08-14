@@ -5,7 +5,7 @@
         "title": "Veracross Grades",
         "description": "Enter your Veracross portal login. This runs a headless browser under the hood, so the first fetch may take a minute.",
         "data": {
-          "school": "School ID (the subdomain part of accounts.veracross.com/<school>)",
+          "school": "School ID (the subdomain part of accounts.veracross.com/\<school\>)",
           "username": "Username / student ID",
           "password": "Password"
         }
