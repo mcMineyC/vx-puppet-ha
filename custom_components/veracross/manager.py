@@ -12,10 +12,12 @@ incidental logging the binary/lightpanda might emit before that.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import platform
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -23,12 +25,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.storage import Store
 
 from .const import (
     BINARY_DIR_NAME,
     BINARY_PREFIX,
     DEFAULT_TIMEOUT_S,
+    DOMAIN,
+    EVENT_FETCH_FAILED,
+    EVENT_GRADE_CHANGED,
+    EVENT_GRADES_UPDATED,
     SIGNAL_GRADES_UPDATED,
     SIGNAL_UPDATING_STATE,
 )
@@ -38,6 +46,21 @@ _LOGGER = logging.getLogger(__name__)
 
 class VeracrossError(Exception):
     """Raised when the CLI reports a failure or can't be run at all."""
+
+
+def slugify_class(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+_PERCENT_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def parse_percent(raw: str | None) -> float | None:
+    """"97.5%" -> 97.5, "" or "N/A" -> None."""
+    if not raw:
+        return None
+    match = _PERCENT_RE.search(raw)
+    return float(match.group()) if match else None
 
 
 def _binary_arch() -> str:
@@ -59,9 +82,46 @@ class VeracrossManager:
     username: str
     password: str
 
+    # False for the throwaway manager the config flow uses to validate creds
+    persist: bool = True
+
     grades: list[dict] = field(default_factory=list)
     last_error: str | None = None
+    last_changed: list[dict] = field(default_factory=list)
     updating: bool = False
+    _inflight: asyncio.Task | None = field(default=None, repr=False)
+    _store: Store | None = field(default=None, repr=False)
+
+    async def async_load(self) -> None:
+        """Restore the last fetched grades so sensors have values right after
+        a restart, and so changes are detected relative to them."""
+        if not self.persist:
+            return
+        self._store = Store(self.hass, 1, f"{DOMAIN}.{self.entry_id}")
+        data = await self._store.async_load()
+        if data:
+            self.grades = data.get("grades", [])
+
+    async def async_remove_store(self) -> None:
+        if self._store:
+            await self._store.async_remove()
+
+    def class_entity_id(self, class_name: str) -> str | None:
+        return er.async_get(self.hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{self.entry_id}_class_{slugify_class(class_name)}"
+        )
+
+    def describe(self, grade: dict) -> dict:
+        """Automation-friendly view of one raw grade dict."""
+        name = grade.get("class", "")
+        return {
+            "class": name,
+            "grade": parse_percent(grade.get("grade")),
+            "grade_raw": grade.get("grade"),
+            "grade_letter": grade.get("gradeLetter"),
+            "new_updates": grade.get("new_updates"),
+            "entity_id": self.class_entity_id(name),
+        }
 
     def _binary_path(self) -> Path:
         integration_dir = Path(__file__).parent
@@ -78,21 +138,70 @@ class VeracrossManager:
         return self.hass.config.path("veracross_lightpanda")
 
     async def async_fetch_grades(self) -> list[dict]:
-        """Run the CLI once. Raises VeracrossError on any failure."""
+        """Fetch grades. Raises VeracrossError on failure.
+
+        Concurrent callers (button + action + startup) share one in-flight
+        fetch instead of launching several browsers at once.
+        """
+        if self._inflight is None or self._inflight.done():
+            self._inflight = self.hass.async_create_task(self._async_do_fetch())
+        return await asyncio.shield(self._inflight)
+
+    async def _async_do_fetch(self) -> list[dict]:
         self._set_updating(True)
         try:
             grades = await self.hass.async_add_executor_job(self._run_cli_blocking)
-            self.grades = grades
-            self.last_error = None
-            async_dispatcher_send(
-                self.hass, SIGNAL_GRADES_UPDATED.format(entry_id=self.entry_id), grades
-            )
-            return grades
         except VeracrossError as err:
             self.last_error = str(err)
+            if self.persist:
+                self.hass.bus.async_fire(
+                    EVENT_FETCH_FAILED, {"entry_id": self.entry_id, "error": str(err)}
+                )
             raise
         finally:
             self._set_updating(False)
+
+        previous = {slugify_class(g.get("class", "")): g for g in self.grades}
+        self.grades = grades
+        self.last_error = None
+        async_dispatcher_send(
+            self.hass, SIGNAL_GRADES_UPDATED.format(entry_id=self.entry_id), grades
+        )
+        if not self.persist:
+            return grades
+
+        await self._store.async_save({"grades": grades})
+
+        # Only diff against a known previous state; the very first fetch
+        # isn't a "change".
+        changed: list[dict] = []
+        if previous:
+            for grade in grades:
+                old = previous.get(slugify_class(grade.get("class", "")))
+                if old is None or any(
+                    old.get(k) != grade.get(k) for k in ("grade", "gradeLetter", "new_updates")
+                ):
+                    info = self.describe(grade)
+                    info.update(
+                        old_grade=parse_percent(old.get("grade")) if old else None,
+                        old_grade_raw=old.get("grade") if old else None,
+                        old_grade_letter=old.get("gradeLetter") if old else None,
+                        old_new_updates=old.get("new_updates") if old else None,
+                    )
+                    changed.append(info)
+        self.last_changed = changed
+
+        for info in changed:
+            self.hass.bus.async_fire(EVENT_GRADE_CHANGED, {"entry_id": self.entry_id, **info})
+        self.hass.bus.async_fire(
+            EVENT_GRADES_UPDATED,
+            {
+                "entry_id": self.entry_id,
+                "grades": [self.describe(g) for g in grades],
+                "changed": changed,
+            },
+        )
+        return grades
 
     def _set_updating(self, value: bool) -> None:
         self.updating = value

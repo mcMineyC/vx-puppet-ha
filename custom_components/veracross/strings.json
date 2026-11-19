@@ -18,5 +18,17 @@
     "abort": {
       "already_configured": "This school/username is already configured."
     }
+  },
+  "services": {
+    "refresh_grades": {
+      "name": "Refresh grades",
+      "description": "Log into Veracross, fetch every class's grade, and wait for it to finish. Optionally returns the grades and what changed since the last fetch.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "Which Veracross account to refresh. Only needed if you have more than one."
+        }
+      }
+    }
   }
 }

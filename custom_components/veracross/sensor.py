@@ -1,8 +1,6 @@
 """Sensors — one per class, created dynamically as grade data arrives."""
 from __future__ import annotations
 
-import re
-
 from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
@@ -15,22 +13,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_SCHOOL, DATA_MANAGER, DOMAIN, SIGNAL_GRADES_UPDATED
-from .manager import VeracrossManager
-
-
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
-
-
-_PERCENT_RE = re.compile(r"-?\d+(?:\.\d+)?")
-
-
-def _parse_percent(raw: str) -> float | None:
-    """"97.5%" -> 97.5, "0.0%" -> 0.0, "" or "N/A" -> None."""
-    if not raw:
-        return None
-    match = _PERCENT_RE.search(raw)
-    return float(match.group()) if match else None
+from .manager import VeracrossManager, parse_percent, slugify_class as _slug
 
 
 async def async_setup_entry(
@@ -106,7 +89,7 @@ class VeracrossGradeSensor(SensorEntity):
     @property
     def native_value(self) -> float | None:
         grade = self._find()
-        return _parse_percent(grade.get("grade", "")) if grade else None
+        return parse_percent(grade.get("grade")) if grade else None
 
     @property
     def extra_state_attributes(self) -> dict:

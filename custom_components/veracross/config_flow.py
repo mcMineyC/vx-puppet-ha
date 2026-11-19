@@ -44,6 +44,7 @@ class VeracrossConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 school=user_input[CONF_SCHOOL],
                 username=user_input[CONF_USERNAME],
                 password=user_input[CONF_PASSWORD],
+                persist=False,
             )
 
             try:

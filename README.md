@@ -32,6 +32,55 @@ No background polling by default — press the button, or call
 `button.press` on it from an automation, whenever you want fresh numbers.
 It also runs once automatically on HA startup.
 
+## Automations
+
+**Action `veracross.refresh_grades`** fetches and *waits* for the result
+(unlike `button.press`, which an automation stops waiting on after ~10s).
+With `response_variable` it returns:
+
+```yaml
+grades:   [{class, grade, grade_raw, grade_letter, new_updates, entity_id}, ...]
+changed:  [ same fields + old_grade, old_grade_raw, old_grade_letter, old_new_updates ]
+```
+
+**Events** fired after every fetch:
+
+- `veracross_grade_changed`: one per class whose grade, letter or
+  `new_updates` changed (same fields as `changed` above).
+- `veracross_grades_updated`: `{grades, changed}` after each successful fetch.
+- `veracross_fetch_failed`: `{error}`.
+
+The last grades are saved, so sensors keep their values across restarts and
+changes are detected relative to the previous fetch.
+
+Notify on any grade change:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: veracross_grade_changed
+actions:
+  - action: notify.notify
+    data:
+      title: "{{ trigger.event.data.class }}"
+      message: >
+        {{ trigger.event.data.old_grade_raw }} → {{ trigger.event.data.grade_raw }}
+        ({{ trigger.event.data.grade_letter }})
+```
+
+Fetch on a schedule and send a summary:
+
+```yaml
+actions:
+  - action: veracross.refresh_grades
+    response_variable: vx
+  - action: notify.notify
+    data:
+      message: >
+        {% for g in vx.grades %}{{ g.class }}: {{ g.grade_raw }}
+        {% endfor %}
+```
+
 ## How it works
 
 `vx_puppet` (the linked Go library) is compiled into a small CLI —
