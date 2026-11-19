@@ -51,6 +51,9 @@ class VeracrossConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except VeracrossError as err:
                 _LOGGER.warning("Veracross login validation failed: %s", err)
                 errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Unexpected error validating Veracross login")
+                errors["base"] = "unknown"
             else:
                 return self.async_create_entry(
                     title=f"Veracross ({user_input[CONF_SCHOOL]})",

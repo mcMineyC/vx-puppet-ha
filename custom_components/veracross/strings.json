@@ -12,7 +12,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Could not log in with those credentials (see Home Assistant logs for details)."
+      "cannot_connect": "Could not log in with those credentials (see Home Assistant logs for details).",
+      "unknown": "Unexpected error (see Home Assistant logs for details)."
     },
     "abort": {
       "already_configured": "This school/username is already configured."

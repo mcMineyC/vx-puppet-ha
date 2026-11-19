@@ -15,7 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import platform
-import os, stat
+import os
+import signal
+import stat
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -98,8 +101,7 @@ class VeracrossManager:
         )
 
     def _run_cli_blocking(self) -> list[dict]:
-        path = self._lightpanda_dir() + "/lightpanda"
-        os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        # (the CLI downloads/chmods lightpanda itself; it may not exist yet)
         binary = self._binary_path()
         args = [
             str(binary),
@@ -109,8 +111,6 @@ class VeracrossManager:
             "-timeout", f"{DEFAULT_TIMEOUT_S}s",
             "-lightpanda-dir", self._lightpanda_dir(),
         ]
-
-        import subprocess
 
         try:
             proc = _run_sync(args, timeout=DEFAULT_TIMEOUT_S + 30)
@@ -138,19 +138,32 @@ class VeracrossManager:
             raise VeracrossError(f"could not parse vx_ha_cli output: {err}") from err
 
         if not payload.get("ok"):
+            _LOGGER.warning("vx_ha_cli failed (rc=%s). stderr tail: %s", returncode, stderr[-2000:])
             raise VeracrossError(payload.get("error", "unknown error"))
 
         return payload.get("grades", [])
 
 
 def _run_sync(args: list[str], timeout: int) -> tuple[str, str, int]:
-    """Blocking subprocess run, meant for async_add_executor_job."""
-    import subprocess
+    """Blocking subprocess run, meant for async_add_executor_job.
 
-    result = subprocess.run(
+    Runs the CLI in its own process group so that on timeout we can kill it
+    *and* the lightpanda browser it spawned, instead of orphaning the browser.
+    """
+    proc = subprocess.Popen(
         args,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
+        start_new_session=True,
     )
-    return result.stdout, result.stderr, result.returncode
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        raise
+    return stdout, stderr, proc.returncode

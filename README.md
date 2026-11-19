@@ -62,7 +62,10 @@ Bump `version` in `custom_components/veracross/manifest.json` to match, tag
 - Each fetch spins up a fresh headless browser instance — expect 10-60s per
   run depending on Veracross/lightpanda.
 - lightpanda itself gets downloaded to `<config>/veracross_lightpanda/` on
-  first use and cached there.
+  first use and cached there. Its Linux builds are glibc-linked, but the HA
+  container is Alpine (musl), so the CLI embeds a minimal glibc runtime
+  (see [`tools/vx_ha_cli/glibc`](tools/vx_ha_cli/glibc)), unpacks it next to
+  lightpanda, and launches lightpanda through that loader.
 
 ## License
 
