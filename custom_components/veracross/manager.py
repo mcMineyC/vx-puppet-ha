@@ -113,8 +113,11 @@ class VeracrossManager:
         ]
 
         try:
-            proc = _run_sync(args, timeout=DEFAULT_TIMEOUT_S + 30)
+            # CLI enforces its own deadline (timeout + 30s); give it room to
+            # report a real error before we kill it.
+            proc = _run_sync(args, timeout=DEFAULT_TIMEOUT_S + 60)
         except subprocess.TimeoutExpired as err:
+            _LOGGER.warning("vx_ha_cli timed out. stderr tail: %s", (err.stderr or "")[-2000:])
             raise VeracrossError("timed out waiting for veracross login/scrape") from err
         except OSError as err:
             raise VeracrossError(f"failed to launch vx_ha_cli: {err}") from err
@@ -164,6 +167,6 @@ def _run_sync(args: list[str], timeout: int) -> tuple[str, str, int]:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        proc.communicate()
-        raise
+        _, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(args, timeout, stderr=stderr)
     return stdout, stderr, proc.returncode
